@@ -1,0 +1,6 @@
+{
+  "name": "Sistem Permintaan Barang Gudang",
+  "description": "Sistem dashboard permintaan barang persediaan gudang sekolah terintegrasi dengan Google Sheets & Apps Script. Dilengkapi alur verifikasi Pengurus Barang, Kasubag TU, dan Validasi Gudang dengan foto.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
