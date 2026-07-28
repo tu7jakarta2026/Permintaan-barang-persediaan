@@ -247,9 +247,16 @@ function getSheetData(sheet) {
     setTestMessage("Sedang menghubungi Google Sheets via Web App...");
 
     try {
-      const result = await fetchRequestsFromGas(urlInput.trim());
+      const res = await fetch("/api/test-connection", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ gasUrl: urlInput.trim() })
+      });
+      const result = await res.json();
 
-      if (result.success) {
+      if (res.ok && result.success) {
         setTestStatus("success");
         setTestMessage("Koneksi berhasil! Google Sheets terhubung dengan sempurna.");
         // Auto-save the URL since it's valid
@@ -261,7 +268,7 @@ function getSheetData(sheet) {
       }
     } catch (err: any) {
       setTestStatus("error");
-      setTestMessage(`Kesalahan: ${err.message || "Gagal menghubungi Apps Script secara langsung."}`);
+      setTestMessage(`Kesalahan: ${err.message || "Gagal menghubungi backend server untuk pengujian."}`);
     }
   };
 

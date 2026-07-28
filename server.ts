@@ -1,49 +1,64 @@
 import express from "express";
 import path from "path";
 import fs from "fs/promises";
-import { createServer as createViteServer } from "vite";
 import { INVENTORY_ITEMS } from "./src/lib/items";
 import { EMPLOYEES } from "./src/lib/employees";
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
 
-  // Setup standard JSON and body parsing middlewares
-  // Increased limit to support base64 validation photo uploads
-  app.use(express.json({ limit: "10mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+// Setup standard JSON and body parsing middlewares
+// Increased limit to support base64 validation photo uploads
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-  const localDbPath = path.join(process.cwd(), "src", "data", "requests.json");
+const localDbPath = path.join(process.cwd(), "src", "data", "requests.json");
+const configPath = path.join(process.cwd(), "src", "data", "config.json");
 
-  // Helper to read local data safely
-  async function readLocalData() {
+let serverGasUrl = process.env.GAS_URL || "https://script.google.com/macros/s/AKfycbyAravxJfFJkUqxUh3PaWRkLcFiBicnQfeDJqEwzadXKGOq0QxZeTcyRoeoiFeKKC09yw/exec";
+
+// Try to load centralized config on startup (non-blocking)
+async function loadConfigOnStartup() {
+  try {
+    const configData = await fs.readFile(configPath, "utf-8");
+    const config = JSON.parse(configData);
+    if (config.gasUrl) {
+      serverGasUrl = config.gasUrl;
+      console.log("Centralized server GAS URL loaded:", serverGasUrl);
+    }
+  } catch (err) {
+    console.log("Using default or environment-defined GAS URL:", serverGasUrl);
+  }
+}
+loadConfigOnStartup();
+
+// Helper to read local data safely
+async function readLocalData() {
+  try {
+    await fs.mkdir(path.dirname(localDbPath), { recursive: true });
     try {
-      await fs.mkdir(path.dirname(localDbPath), { recursive: true });
-      try {
-        const data = await fs.readFile(localDbPath, "utf-8");
-        return JSON.parse(data);
-      } catch (e) {
-        // If file doesn't exist, return empty array
-        return [];
-      }
-    } catch (error) {
-      console.error("Error reading local DB:", error);
+      const data = await fs.readFile(localDbPath, "utf-8");
+      return JSON.parse(data);
+    } catch (e) {
+      // If file doesn't exist, return empty array
       return [];
     }
+  } catch (error) {
+    console.error("Error reading local DB:", error);
+    return [];
   }
+}
 
-  // Helper to write local data safely
-  async function writeLocalData(data: any) {
-    try {
-      await fs.mkdir(path.dirname(localDbPath), { recursive: true });
-      await fs.writeFile(localDbPath, JSON.stringify(data, null, 2), "utf-8");
-      return true;
-    } catch (error) {
-      console.error("Error writing local DB:", error);
-      return false;
-    }
+// Helper to write local data safely
+async function writeLocalData(data: any) {
+  try {
+    await fs.mkdir(path.dirname(localDbPath), { recursive: true });
+    await fs.writeFile(localDbPath, JSON.stringify(data, null, 2), "utf-8");
+    return true;
+  } catch (error) {
+    console.error("Error writing local DB:", error);
+    return false;
   }
+}
 
   // API 0: Live Items from Google Spreadsheet (automatic sync)
   app.get("/api/items", async (req, res) => {
@@ -246,6 +261,28 @@ async function startServer() {
     }
   });
 
+  // API 1.1: Get Centralized Config
+  app.get("/api/config", (req, res) => {
+    return res.json({ success: true, gasUrl: serverGasUrl });
+  });
+
+  // API 1.2: Save Centralized Config
+  app.post("/api/config", async (req, res) => {
+    const { gasUrl } = req.body;
+    if (gasUrl !== undefined) {
+      serverGasUrl = gasUrl;
+      try {
+        await fs.mkdir(path.dirname(configPath), { recursive: true });
+        await fs.writeFile(configPath, JSON.stringify({ gasUrl }, null, 2), "utf-8");
+        console.log("Centralized server GAS URL saved to config.json:", gasUrl);
+      } catch (err) {
+        console.error("Failed to write config.json:", err);
+      }
+      return res.json({ success: true, gasUrl });
+    }
+    return res.status(400).json({ success: false, error: "gasUrl is required." });
+  });
+
   // API 1: Test Connection
   app.post("/api/test-connection", async (req, res) => {
     const { gasUrl } = req.body;
@@ -289,7 +326,8 @@ async function startServer() {
 
   // API 2: Get Requests (Fetches either from GAS or Local File)
   app.get("/api/requests", async (req, res) => {
-    const gasUrl = req.headers["x-gas-url"] as string;
+    const headerGasUrl = req.headers["x-gas-url"] as string;
+    const gasUrl = (headerGasUrl && headerGasUrl.trim() !== "") ? headerGasUrl : serverGasUrl;
 
     if (gasUrl && gasUrl.trim() !== "") {
       try {
@@ -339,7 +377,8 @@ async function startServer() {
 
   // API 3: Create or Update Request
   app.post("/api/requests", async (req, res) => {
-    const gasUrl = req.headers["x-gas-url"] as string;
+    const headerGasUrl = req.headers["x-gas-url"] as string;
+    const gasUrl = (headerGasUrl && headerGasUrl.trim() !== "") ? headerGasUrl : serverGasUrl;
     const { action, data: requestItem } = req.body;
 
     if (!action || !requestItem) {
@@ -415,27 +454,34 @@ async function startServer() {
   });
 
   // Setup Vite Dev Server / Static files
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
+  if (!process.env.VERCEL) {
+    const startLocalServer = async () => {
+      const PORT = 3000;
+      if (process.env.NODE_ENV !== "production") {
+        const { createServer: createViteServer } = await import("vite");
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: "spa",
+        });
+        app.use(vite.middlewares);
+        console.log("Vite development middleware mounted.");
+      } else {
+        const distPath = path.join(process.cwd(), "dist");
+        app.use(express.static(distPath));
+        app.get("*", (req, res) => {
+          res.sendFile(path.join(distPath, "index.html"));
+        });
+        console.log("Production static files mounted.");
+      }
+
+      app.listen(PORT, "0.0.0.0", () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+      });
+    };
+
+    startLocalServer().catch((err) => {
+      console.error("Failed to start server:", err);
     });
-    app.use(vite.middlewares);
-    console.log("Vite development middleware mounted.");
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-    console.log("Production static files mounted.");
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-}
-
-startServer().catch((err) => {
-  console.error("Failed to start server:", err);
-});
+  export default app;

@@ -81,6 +81,25 @@ export default function App() {
     }
   }, [currentEmployee, activeTab, canAccessSettings]);
 
+  // Load centralized configuration from backend server on mount
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const res = await fetch("/api/config");
+        if (res.ok) {
+          const result = await res.json();
+          if (result.success && result.gasUrl) {
+            setGasUrl(result.gasUrl);
+            localStorage.setItem("gasUrl", result.gasUrl);
+          }
+        }
+      } catch (err) {
+        console.error("Gagal mengambil konfigurasi terpusat dari server:", err);
+      }
+    };
+    fetchConfig();
+  }, []);
+
   // Modals state
   const [activeRequest, setActiveRequest] = useState<InventoryRequest | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -148,18 +167,33 @@ export default function App() {
       return;
     }
 
-    // 2. LIVE PRODUCTION GAS FETCH
+    // 2. LIVE PRODUCTION FETCH VIA SERVER PROXY
     try {
-      const result = await fetchRequestsFromGas(gasUrl.trim());
+      const headers: { [key: string]: string } = {};
+      if (gasUrl.trim()) {
+        headers["x-gas-url"] = gasUrl.trim();
+      }
+      
+      const res = await fetch("/api/requests", {
+        headers
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP Error ${res.status}`);
+      }
+      const result = await res.json();
+
       if (result && result.success) {
         setRequests(result.data || []);
-        setDataSource("Google Sheets (Live)");
+        setDataSource(result.source || "Google Sheets (Live)");
+        if (result.warning) {
+          setErrorAlert(result.warning);
+        }
         // Update local requests cache for offline resilience
         if (result.data) {
           localStorage.setItem("local_requests", JSON.stringify(result.data));
         }
       } else {
-        throw new Error(result.error || "Google Apps Script mengembalikan status gagal.");
+        throw new Error(result.error || "Server backend mengembalikan status gagal.");
       }
     } catch (err: any) {
       console.error("Gagal memuat pengajuan dari GAS:", err);
@@ -183,13 +217,27 @@ export default function App() {
   };
 
   // Save the GAS URL
-  const handleSaveGasUrl = (url: string) => {
+  const handleSaveGasUrl = async (url: string) => {
     setGasUrl(url);
     localStorage.setItem("gasUrl", url);
+    
+    // Save to server config so that all users get synced automatically
+    try {
+      await fetch("/api/config", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ gasUrl: url })
+      });
+    } catch (err) {
+      console.error("Gagal menyimpan konfigurasi GAS URL ke server:", err);
+    }
+
     if (url.trim()) {
       setIsDemoMode(false);
       localStorage.setItem("isDemoMode", "false");
-      triggerAlert("success", "URL Google Apps Script berhasil disimpan. Sistem mencoba sinkronisasi...");
+      triggerAlert("success", "URL Google Apps Script berhasil disimpan secara terpusat di server. Semua pemohon otomatis disinkronkan!");
     } else {
       setIsDemoMode(true);
       localStorage.setItem("isDemoMode", "true");
@@ -233,11 +281,26 @@ export default function App() {
         return;
       }
 
-      // 2. LIVE PRODUCTION GAS POST
+      // 2. LIVE PRODUCTION POST VIA SERVER PROXY
       const requestsArray = Array.isArray(newRequest) ? newRequest : [newRequest];
+      const headers: { [key: string]: string } = {
+        "Content-Type": "application/json"
+      };
+      if (gasUrl.trim()) {
+        headers["x-gas-url"] = gasUrl.trim();
+      }
 
       for (const reqItem of requestsArray) {
-        const result = await postToGas(gasUrl.trim(), "create", reqItem);
+        const res = await fetch("/api/requests", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ action: "create", data: reqItem })
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `HTTP Error ${res.status}`);
+        }
+        const result = await res.json();
         if (!result.success) {
           throw new Error(result.error || "Gagal menyimpan pengajuan.");
         }
@@ -310,9 +373,24 @@ export default function App() {
       return;
     }
 
-    // 2. LIVE PRODUCTION GAS POST
+    // 2. LIVE PRODUCTION POST VIA SERVER PROXY
     try {
-      const result = await postToGas(gasUrl.trim(), "update", updatedData);
+      const headers: { [key: string]: string } = {
+        "Content-Type": "application/json"
+      };
+      if (gasUrl.trim()) {
+        headers["x-gas-url"] = gasUrl.trim();
+      }
+      const res = await fetch("/api/requests", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action: "update", data: updatedData })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP Error ${res.status}`);
+      }
+      const result = await res.json();
       if (result.success) {
         triggerAlert("success", `Status pengajuan ${id} berhasil diperbarui di Google Sheets.`);
         fetchRequests();
@@ -367,9 +445,24 @@ export default function App() {
       return;
     }
 
-    // 2. LIVE PRODUCTION GAS POST
+    // 2. LIVE PRODUCTION POST VIA SERVER PROXY
     try {
-      const result = await postToGas(gasUrl.trim(), "update", mergedData);
+      const headers: { [key: string]: string } = {
+        "Content-Type": "application/json"
+      };
+      if (gasUrl.trim()) {
+        headers["x-gas-url"] = gasUrl.trim();
+      }
+      const res = await fetch("/api/requests", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action: "update", data: mergedData })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP Error ${res.status}`);
+      }
+      const result = await res.json();
       if (result.success) {
         triggerAlert("success", `Validasi foto selesai! Pengajuan ${id} ditandai sebagai SERAH TERIMA / SELESAI.`);
         fetchRequests();
