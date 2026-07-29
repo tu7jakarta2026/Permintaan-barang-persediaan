@@ -598,7 +598,7 @@ export default function App() {
               }`}
             >
               <Settings className="w-4 h-4 shrink-0" />
-              <span className="text-xs font-medium">Integrasi Google Sheets</span>
+              <span className="text-xs font-medium">Pengaturan & Embed Iframe</span>
             </button>
           )}
         </nav>
@@ -660,18 +660,18 @@ export default function App() {
         <header className="bg-white border-b border-slate-200 px-6 sm:px-8 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
           <div className="flex flex-wrap items-center gap-2 sm:gap-4">
             <h2 className="text-base sm:text-lg font-bold text-slate-800 tracking-tight font-display">
-              {activeTab === "dashboard" ? "Dashboard Overview Status" : "Integrasi Google Sheets"}
+              {activeTab === "dashboard" ? "Dashboard Overview Status" : "Pengaturan Database & Embed Iframe"}
             </h2>
             <div>
               {!isDemoMode && gasUrl ? (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-bold uppercase border border-emerald-100">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  Google Sheet Connected
+                  Google Sheets Active
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 text-[10px] font-bold uppercase border border-amber-100">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                  Mode Demo (Lokal)
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold uppercase border border-blue-100">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
+                  Database Server Terpusat
                 </span>
               )}
             </div>

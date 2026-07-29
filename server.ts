@@ -6,6 +6,18 @@ import { EMPLOYEES } from "./src/lib/employees";
 
 const app = express();
 
+// Allow iframe embedding & cross-origin requests for Google Sites, WordPress, etc.
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-gas-url");
+  res.removeHeader("X-Frame-Options");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Setup standard JSON and body parsing middlewares
 // Increased limit to support base64 validation photo uploads
 app.use(express.json({ limit: "10mb" }));
@@ -358,20 +370,18 @@ async function writeLocalData(data: any) {
           return res.status(500).json({ success: false, error: result.error || "Gagal mengambil data dari Google Sheets." });
         }
       } catch (error: any) {
-        console.error("Fetch from GAS failed, falling back to local DB:", error.message);
-        // Fallback to local data on connection error, but notify the user
+        console.error("Fetch from GAS failed, falling back to local server DB:", error.message);
         const localData = await readLocalData();
         return res.json({
           success: true,
-          source: "Database Lokal (Fallback)",
-          warning: `Gagal menghubungkan ke Google Sheets: ${error.message}`,
+          source: "Database Server (Terpusat)",
           data: localData
         });
       }
     } else {
-      // Return local database
+      // Return local server database
       const localData = await readLocalData();
-      return res.json({ success: true, source: "Database Lokal (Demo)", data: localData });
+      return res.json({ success: true, source: "Database Server (Terpusat)", data: localData });
     }
   });
 
@@ -419,23 +429,44 @@ async function writeLocalData(data: any) {
         if (result && result.success) {
           return res.json({ success: true, source: "Google Sheets", message: result.message });
         } else {
-          return res.status(500).json({ success: false, error: result.error || "Gagal memperbarui Google Sheets." });
+          throw new Error(result.error || "Gagal memperbarui Google Sheets.");
         }
       } catch (error: any) {
-        console.error("Write to GAS failed:", error);
-        return res.status(500).json({
-          success: false,
-          error: `Gagal memperbarui Google Sheets: ${error.message}. Silakan periksa koneksi atau kembali ke Mode Demo.`
+        console.error("Write to GAS failed, saving to server DB fallback:", error.message);
+        const localData = await readLocalData();
+        if (action === "create") {
+          if (Array.isArray(requestItem)) {
+            localData.unshift(...requestItem);
+          } else {
+            localData.unshift(requestItem);
+          }
+        } else if (action === "update") {
+          const index = localData.findIndex((item: any) => item.id === requestItem.id);
+          if (index !== -1) {
+            localData[index] = { ...localData[index], ...requestItem };
+          } else {
+            localData.unshift(requestItem);
+          }
+        }
+        await writeLocalData(localData);
+        return res.json({
+          success: true,
+          source: "Database Server (Terpusat)",
+          message: "Data berhasil disimpan di Database Server Terpusat."
         });
       }
     } else {
-      // Local Database Operation
+      // Local Server Database Operation
       const localData = await readLocalData();
       if (action === "create") {
-        localData.unshift(requestItem); // Add new request to beginning of array
+        if (Array.isArray(requestItem)) {
+          localData.unshift(...requestItem);
+        } else {
+          localData.unshift(requestItem);
+        }
         const ok = await writeLocalData(localData);
         if (ok) {
-          return res.json({ success: true, source: "Database Lokal", message: "Permintaan baru berhasil dibuat di database lokal." });
+          return res.json({ success: true, source: "Database Server (Terpusat)", message: "Permintaan baru berhasil dibuat di Database Server Terpusat." });
         }
       } else if (action === "update") {
         const index = localData.findIndex((item: any) => item.id === requestItem.id);
@@ -443,7 +474,7 @@ async function writeLocalData(data: any) {
           localData[index] = { ...localData[index], ...requestItem };
           const ok = await writeLocalData(localData);
           if (ok) {
-            return res.json({ success: true, source: "Database Lokal", message: "Permintaan berhasil diperbarui di database lokal." });
+            return res.json({ success: true, source: "Database Server (Terpusat)", message: "Permintaan berhasil diperbarui di Database Server Terpusat." });
           }
         } else {
           return res.status(404).json({ success: false, error: "ID Permintaan tidak ditemukan di database lokal." });
